@@ -91,14 +91,14 @@ function applyStatus(vo) {
 async function loadOrder() {
   if (props.invalidPath) {
     phase.value = 'error'
-    errorMsg.value = '页面异常'
+    errorMsg.value = '请通过正确链接访问'
     return
   }
 
   const no = String(props.orderNo || '').trim()
   if (!no) {
     phase.value = 'error'
-    errorMsg.value = '页面异常'
+    errorMsg.value = '请通过正确链接访问'
     return
   }
 

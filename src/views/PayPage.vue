@@ -22,19 +22,27 @@
     <main v-else-if="phase === 'success'" class="status-panel">
       <div class="icon-circle success">✓</div>
       <p class="status-title success-text">支付成功</p>
+      <p v-if="displayOrderNo" class="order-id">订单号： {{ displayOrderNo }}</p>
     </main>
 
     <!-- closed -->
     <main v-else-if="phase === 'closed'" class="status-panel">
       <div class="icon-circle closed">!</div>
       <p class="status-title danger">订单已关闭</p>
+      <p v-if="displayOrderNo" class="order-id">订单号： {{ displayOrderNo }}</p>
     </main>
 
     <!-- paying: QR + button -->
     <main v-else class="pay-panel">
+      <div class="alipay-brand">
+        <img src="/alipay.ico" alt="支付宝" class="alipay-icon" />
+        <span>支付</span>
+      </div>
+
       <p v-if="amountText" class="amount">
         <span class="currency">¥</span>{{ amountText }}
       </p>
+      <p v-if="displayOrderNo" class="order-id">订单号： {{ displayOrderNo }}</p>
 
       <div class="qr-wrap">
         <img
@@ -47,6 +55,7 @@
       </div>
 
       <button class="pay-btn" type="button" @click="handlePay">
+        <img src="/alipay.ico" alt="" class="pay-btn-icon" />
         点击支付
       </button>
     </main>
@@ -89,6 +98,9 @@ const probeFrame = ref(null)
 let pollTimer = null
 
 const hasOrderNo = computed(() => Boolean(String(props.orderNo || '').trim()))
+const displayOrderNo = computed(
+  () => order.value?.orderNo || String(props.orderNo || '').trim(),
+)
 const payQrUrl = computed(() => order.value?.payQrUrl || '')
 const channelTxid = computed(() => String(order.value?.channelTxid || '').trim())
 const amountText = computed(() => {
@@ -320,7 +332,7 @@ onBeforeUnmount(() => {
 
 .ghost-btn {
   margin-top: 1.25rem;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  border: 1px solid #d1d5db;
   background: transparent;
   color: var(--text);
   border-radius: 999px;
@@ -332,7 +344,7 @@ onBeforeUnmount(() => {
   font-size: 2.5rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.45rem;
 }
 
 .currency {
@@ -340,6 +352,29 @@ onBeforeUnmount(() => {
   margin-right: 0.15rem;
   font-weight: 600;
   color: var(--gold);
+}
+
+.order-id {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 1.25rem;
+  word-break: break-all;
+}
+
+.alipay-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 1.25rem;
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: #1677ff;
+}
+
+.alipay-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
 }
 
 .qr-wrap {
@@ -354,6 +389,7 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   background: #fff;
   padding: 10px;
+  border: 1px solid #e5e7eb;
 }
 
 .qr-loading {
@@ -363,7 +399,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.06);
+  background: #f3f4f6;
   border-radius: 12px;
 }
 
@@ -375,9 +411,19 @@ onBeforeUnmount(() => {
   padding: 0.9rem 1.25rem;
   font-size: 1rem;
   font-weight: 650;
-  color: #042f2e;
-  background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+  color: #fff;
+  background: linear-gradient(135deg, #1677ff, #0958d9);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.pay-btn-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
 }
 
 .pay-btn:active {

@@ -1,48 +1,89 @@
 <template>
   <div class="page">
+    <!-- 下单表单 -->
+    <main v-if="phase === 'form'" class="form-panel">
+      <h1 class="brand">聚合支付</h1>
+      <p class="hint">选择支付方式并输入金额</p>
+
+      <label class="field-label" for="amount">金额（元）</label>
+      <div class="amount-input-wrap">
+        <span class="currency">¥</span>
+        <input
+          id="amount"
+          v-model="amountYuan"
+          class="amount-input"
+          type="number"
+          inputmode="decimal"
+          min="0.01"
+          step="0.01"
+          placeholder="0.00"
+        />
+      </div>
+
+      <p class="field-label">支付方式</p>
+      <div class="pay-type-grid">
+        <button
+          v-for="item in PAY_TYPES"
+          :key="item.code"
+          type="button"
+          class="pay-type-btn"
+          :class="{ active: payType === item.code }"
+          @click="payType = item.code"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+
+      <p v-if="errorMsg" class="form-error">{{ errorMsg }}</p>
+
+      <button
+        class="pay-btn"
+        type="button"
+        :disabled="submitting"
+        @click="submitPay"
+      >
+        {{ submitting ? '下单中…' : '去支付' }}
+      </button>
+    </main>
+
     <!-- loading -->
-    <main v-if="phase === 'loading'" class="status-panel">
-      <p class="status-title">加载中…</p>
+    <main v-else-if="phase === 'loading'" class="status-panel">
+      <p class="status-title">正在拉起支付…</p>
+    </main>
+
+    <!-- success -->
+    <main v-else-if="phase === 'success'" class="status-panel">
+      <div class="icon-circle success">✓</div>
+      <p class="status-title success-text">支付成功</p>
+      <p v-if="amountText" class="amount success-amount">
+        <span class="currency">¥</span>{{ amountText }}
+      </p>
+      <p v-if="orderNo" class="order-id">订单号： {{ orderNo }}</p>
+      <button class="ghost-btn" type="button" @click="backToForm">再下一单</button>
     </main>
 
     <!-- error -->
     <main v-else-if="phase === 'error'" class="status-panel">
-      <p class="status-title danger">{{ errorMsg || '加载失败' }}</p>
-      <button
-        v-if="hasOrderNo"
-        class="ghost-btn"
-        type="button"
-        @click="loadOrder"
-      >
-        重试
-      </button>
+      <p class="status-title danger">{{ errorMsg || '下单失败' }}</p>
+      <button class="ghost-btn" type="button" @click="backToForm">重试</button>
     </main>
 
-    <!-- paid success -->
-    <main v-else-if="phase === 'success'" class="status-panel">
-      <div class="icon-circle success">✓</div>
-      <p class="status-title success-text">支付成功</p>
-      <p v-if="displayOrderNo" class="order-id">订单号： {{ displayOrderNo }}</p>
-    </main>
-
-    <!-- closed -->
-    <main v-else-if="phase === 'closed'" class="status-panel">
-      <div class="icon-circle closed">!</div>
-      <p class="status-title danger">订单已关闭</p>
-      <p v-if="displayOrderNo" class="order-id">订单号： {{ displayOrderNo }}</p>
-    </main>
-
-    <!-- paying: QR + button -->
+    <!-- paying: QR + orderNo + poll -->
     <main v-else class="pay-panel">
       <div class="alipay-brand">
-        <img src="/alipay.ico" alt="支付宝" class="alipay-icon" />
-        <span>支付</span>
+        <img
+          v-if="payType === 'ALIPAY'"
+          src="/alipay.ico"
+          alt=""
+          class="alipay-icon"
+        />
+        <span>{{ payTypeLabel }}</span>
       </div>
 
       <p v-if="amountText" class="amount">
         <span class="currency">¥</span>{{ amountText }}
       </p>
-      <p v-if="displayOrderNo" class="order-id">订单号： {{ displayOrderNo }}</p>
+      <p v-if="orderNo" class="order-id">订单号： {{ orderNo }}</p>
 
       <div class="qr-wrap">
         <img
@@ -54,60 +95,53 @@
         <div v-else class="qr-loading">生成二维码中…</div>
       </div>
 
+      <p class="poll-hint">请扫码支付，支付完成后将自动跳转</p>
+
       <button class="pay-btn" type="button" @click="handlePay">
-        <img src="/alipay.ico" alt="" class="pay-btn-icon" />
         点击支付
       </button>
+      <button class="ghost-btn" type="button" @click="backToForm">
+        重新下单
+      </button>
     </main>
-
-    <!-- 隐藏探测支付结果 -->
-    <iframe
-      v-if="probeSrc"
-      ref="probeFrame"
-      class="probe-frame"
-      :src="probeSrc"
-      title="pay-probe"
-      @load="onProbeLoad"
-    />
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import QRCode from 'qrcode'
-import { queryOrder } from '../api/order'
+import {
+  createAggregatePay,
+  queryAggregatePay,
+  ORDER_STATUS,
+  PAY_TYPES,
+} from '../api/pay'
 
-const SUCCESS_PROBE_BASE =
-  'https://www.steadypay.js.cn/paypage/success.php?trade_no='
-const SUCCESS_HINTS = ['订单校验失败', '支付成功']
-
-const props = defineProps({
-  orderNo: { type: String, default: '' },
-  /** 非 /:orderNo 的路径一律视为异常 */
-  invalidPath: { type: Boolean, default: false },
-})
-
-/** loading | paying | success | closed | error */
-const phase = ref('loading')
+/** form | loading | paying | success | error */
+const phase = ref('form')
 const errorMsg = ref('')
-const order = ref(null)
+const submitting = ref(false)
+
+const amountYuan = ref('')
+const payType = ref('ALIPAY')
+
+const orderNo = ref('')
+const payUrl = ref('')
+const amountFen = ref(null)
 const qrDataUrl = ref('')
-const probeSrc = ref('')
-const probeFrame = ref(null)
 
 let pollTimer = null
 
-const hasOrderNo = computed(() => Boolean(String(props.orderNo || '').trim()))
-const displayOrderNo = computed(
-  () => order.value?.orderNo || String(props.orderNo || '').trim(),
-)
-const payQrUrl = computed(() => order.value?.payQrUrl || '')
-const channelTxid = computed(() => String(order.value?.channelTxid || '').trim())
+const payTypeLabel = computed(() => {
+  const hit = PAY_TYPES.find((t) => t.code === payType.value)
+  return hit ? hit.label : payType.value
+})
+
 const amountText = computed(() => {
-  const a = order.value?.amount
+  const a = amountFen.value
   if (a == null || a === '') return ''
-  const n = Number(a)
-  return Number.isFinite(n) ? n.toFixed(2) : String(a)
+  const n = Number(a) / 100
+  return Number.isFinite(n) ? n.toFixed(2) : ''
 })
 
 async function generateQr(url) {
@@ -125,132 +159,49 @@ async function generateQr(url) {
   })
 }
 
+function parseAmountFen() {
+  const yuan = Number(String(amountYuan.value || '').trim())
+  if (!Number.isFinite(yuan) || yuan <= 0) {
+    return null
+  }
+  return Math.round(yuan * 100)
+}
+
 function markSuccess() {
   if (phase.value === 'success') return
   phase.value = 'success'
   stopPoll()
-  probeSrc.value = ''
 }
 
-function buildProbeUrl() {
-  const txid = channelTxid.value
-  if (!txid) return ''
-  return `${SUCCESS_PROBE_BASE}${encodeURIComponent(txid)}&_t=${Date.now()}`
-}
-
-function refreshProbe() {
-  if (phase.value !== 'paying') return
-  const url = buildProbeUrl()
-  if (!url) return
-  // 隐藏访问通道结果页（可能有业务副作用）
-  probeSrc.value = url
-  // 跨域 iframe 通常读不到内容，走同源代理拉取文案判定
-  probeViaFetch()
-}
-
-function onProbeLoad() {
-  if (phase.value !== 'paying') return
-  const iframe = probeFrame.value
-  if (!iframe) return
+async function pollStatus() {
+  const no = String(orderNo.value || '').trim()
+  if (!no || phase.value !== 'paying') return
   try {
-    const doc = iframe.contentDocument || iframe.contentWindow?.document
-    if (!doc) return
-    const text = (doc.body && doc.body.innerText) || ''
-    const html = doc.documentElement ? doc.documentElement.innerHTML : ''
-    const blob = `${text}\n${html}`
-    if (SUCCESS_HINTS.some((k) => blob.includes(k))) {
+    const vo = await queryAggregatePay(no)
+    if (!vo) return
+    if (vo.status === ORDER_STATUS.SUCCESS) {
       markSuccess()
+      return
     }
-  } catch (_) {
-    // 跨域忽略，依赖 probeViaFetch
-  }
-}
-
-async function probeViaFetch() {
-  if (phase.value !== 'paying') return
-  const txid = channelTxid.value
-  if (!txid) return
-  try {
-    // 开发/线上可通过反向代理把 /steadypay-probe 转到 steadypay，避免跨域
-    const res = await fetch(
-      `/steadypay-probe/success.php?trade_no=${encodeURIComponent(txid)}&_t=${Date.now()}`,
-      { credentials: 'omit' },
-    )
-    const html = await res.text()
-    if (SUCCESS_HINTS.some((k) => html.includes(k))) {
-      markSuccess()
+    if (
+      vo.status === ORDER_STATUS.FAIL ||
+      vo.status === ORDER_STATUS.CLOSED
+    ) {
+      phase.value = 'error'
+      errorMsg.value =
+        vo.status === ORDER_STATUS.CLOSED ? '订单已关闭' : '支付失败'
+      stopPoll()
     }
   } catch (e) {
-    console.warn('[pay-probe]', e.message || e)
+    console.warn('[poll status]', e.message || e)
   }
-}
-
-function applyStatus(vo) {
-  order.value = vo
-  const st = vo?.orderStatus
-  if (st === 1) {
-    markSuccess()
-    return
-  }
-  if (st === 2) {
-    phase.value = 'closed'
-    stopPoll()
-    probeSrc.value = ''
-    return
-  }
-  if (!vo?.payQrUrl) {
-    phase.value = 'error'
-    errorMsg.value = '支付链接为空'
-    return
-  }
-  if (!String(vo.channelTxid || '').trim()) {
-    phase.value = 'error'
-    errorMsg.value = '通道订单号为空'
-    return
-  }
-  phase.value = 'paying'
-  generateQr(vo.payQrUrl)
-  startPoll()
-}
-
-async function loadOrder() {
-  if (props.invalidPath) {
-    phase.value = 'error'
-    errorMsg.value = '请通过正确链接访问'
-    return
-  }
-
-  const no = String(props.orderNo || '').trim()
-  if (!no) {
-    phase.value = 'error'
-    errorMsg.value = '请通过正确链接访问'
-    return
-  }
-
-  phase.value = 'loading'
-  errorMsg.value = ''
-  qrDataUrl.value = ''
-  probeSrc.value = ''
-  try {
-    const vo = await queryOrder(no)
-    applyStatus(vo)
-  } catch (e) {
-    phase.value = 'error'
-    errorMsg.value = e.message || '查询失败'
-  }
-}
-
-function handlePay() {
-  const url = payQrUrl.value
-  if (!url) return
-  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function startPoll() {
   stopPoll()
-  refreshProbe()
+  pollStatus()
   pollTimer = window.setInterval(() => {
-    refreshProbe()
+    pollStatus()
   }, 3000)
 }
 
@@ -261,17 +212,65 @@ function stopPoll() {
   }
 }
 
-watch(
-  () => [props.orderNo, props.invalidPath],
-  () => {
-    stopPoll()
-    loadOrder()
-  },
-)
+async function submitPay() {
+  errorMsg.value = ''
+  const fen = parseAmountFen()
+  if (fen == null) {
+    errorMsg.value = '请输入有效金额'
+    return
+  }
+  if (!payType.value) {
+    errorMsg.value = '请选择支付方式'
+    return
+  }
 
-onMounted(() => {
-  loadOrder()
-})
+  submitting.value = true
+  phase.value = 'loading'
+  stopPoll()
+  try {
+    const vo = await createAggregatePay({
+      amount: fen,
+      payType: payType.value,
+    })
+    if (!vo?.payUrl) {
+      phase.value = 'error'
+      errorMsg.value = '支付链接为空'
+      return
+    }
+    if (!vo.orderNo) {
+      phase.value = 'error'
+      errorMsg.value = '订单号为空'
+      return
+    }
+    orderNo.value = vo.orderNo
+    payUrl.value = vo.payUrl
+    amountFen.value = vo.amount != null ? vo.amount : fen
+    phase.value = 'paying'
+    await generateQr(vo.payUrl)
+    startPoll()
+  } catch (e) {
+    phase.value = 'error'
+    errorMsg.value = e.message || '下单失败'
+  } finally {
+    submitting.value = false
+  }
+}
+
+function handlePay() {
+  const url = payUrl.value
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function backToForm() {
+  stopPoll()
+  phase.value = 'form'
+  errorMsg.value = ''
+  orderNo.value = ''
+  payUrl.value = ''
+  qrDataUrl.value = ''
+  amountFen.value = null
+}
 
 onBeforeUnmount(() => {
   stopPoll()
@@ -289,9 +288,88 @@ onBeforeUnmount(() => {
 }
 
 .status-panel,
-.pay-panel {
+.pay-panel,
+.form-panel {
   width: min(100%, 360px);
   text-align: center;
+}
+
+.brand {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.field-label {
+  display: block;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.45rem;
+}
+
+.amount-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  background: #fff;
+}
+
+.amount-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 1.5rem;
+  font-weight: 700;
+  width: 100%;
+  background: transparent;
+  color: var(--text);
+}
+
+.amount-input-wrap .currency {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.pay-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.pay-type-btn {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 10px;
+  padding: 0.65rem 0.35rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.pay-type-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(22, 119, 255, 0.06);
+  font-weight: 650;
+}
+
+.form-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
 }
 
 .status-title {
@@ -321,17 +399,12 @@ onBeforeUnmount(() => {
 }
 
 .icon-circle.success {
-  background: rgba(52, 211, 153, 0.15);
+  background: rgba(22, 163, 74, 0.12);
   color: var(--success);
 }
 
-.icon-circle.closed {
-  background: rgba(248, 113, 113, 0.15);
-  color: var(--danger);
-}
-
 .ghost-btn {
-  margin-top: 1.25rem;
+  margin-top: 1rem;
   border: 1px solid #d1d5db;
   background: transparent;
   color: var(--text);
@@ -347,6 +420,11 @@ onBeforeUnmount(() => {
   margin-bottom: 0.45rem;
 }
 
+.success-amount {
+  font-size: 1.75rem;
+  margin-top: 0.5rem;
+}
+
 .currency {
   font-size: 1.25rem;
   margin-right: 0.15rem;
@@ -359,6 +437,12 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
   margin-bottom: 1.25rem;
   word-break: break-all;
+}
+
+.poll-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
 }
 
 .alipay-brand {
@@ -380,7 +464,7 @@ onBeforeUnmount(() => {
 .qr-wrap {
   display: flex;
   justify-content: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .qr-image {
@@ -420,22 +504,12 @@ onBeforeUnmount(() => {
   gap: 0.45rem;
 }
 
-.pay-btn-icon {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
+.pay-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
-.pay-btn:active {
+.pay-btn:active:not(:disabled) {
   transform: scale(0.98);
-}
-
-.probe-frame {
-  position: absolute;
-  width: 0;
-  height: 0;
-  border: 0;
-  opacity: 0;
-  pointer-events: none;
 }
 </style>

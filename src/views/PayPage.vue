@@ -54,10 +54,10 @@
         <div v-else class="qr-loading">生成二维码中…</div>
       </div>
 
-      <button class="pay-btn" type="button" @click="handlePay">
+      <a class="pay-btn" :href="alipayHref">
         <img src="/alipay.ico" alt="" class="pay-btn-icon" />
         点击支付
-      </button>
+      </a>
     </main>
 
     <!-- 隐藏探测支付结果 -->
@@ -102,6 +102,12 @@ const displayOrderNo = computed(
   () => order.value?.orderNo || String(props.orderNo || '').trim(),
 )
 const payQrUrl = computed(() => order.value?.payQrUrl || '')
+/** 唤起支付宝打开支付链接 */
+const alipayHref = computed(
+  () =>
+    'alipays://platformapi/startapp?appId=20000067&url=' +
+    encodeURIComponent(payQrUrl.value),
+)
 const channelTxid = computed(() => String(order.value?.channelTxid || '').trim())
 const amountText = computed(() => {
   const a = order.value?.amount
@@ -238,12 +244,6 @@ async function loadOrder() {
     phase.value = 'error'
     errorMsg.value = e.message || '查询失败'
   }
-}
-
-function handlePay() {
-  const url = payQrUrl.value
-  if (!url) return
-  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function startPoll() {
@@ -418,6 +418,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .pay-btn-icon {

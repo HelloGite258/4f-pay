@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "qrcode": "^1.5.4",
+    "jsqr": "^1.4.0",
     "vue": "^3.4.38",
     "vue-router": "^4.6.4"
   },

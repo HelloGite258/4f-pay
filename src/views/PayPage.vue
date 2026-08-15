@@ -28,7 +28,6 @@
         <p class="pay-tip">
           {{ isPaid ? '订单已支付' : '请点击下方按钮唤起支付宝完成支付' }}
         </p>
-        <p v-if="decodeError" class="decode-error">{{ decodeError }}</p>
 
         <a
           v-if="!isPaid && payHref"
@@ -49,7 +48,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { decodePayUrlFromQrImage } from '../utils/decodeQr'
+import QRCode from 'qrcode'
 
 const route = useRoute()
 
@@ -65,30 +64,25 @@ const ORDER_STATUS_MAP = {
 }
 
 const loading = ref(false)
-const decoding = ref(false)
+const preparing = ref(false)
 const errorMsg = ref('')
-const decodeError = ref('')
 const orderNo = ref('')
 const amount = ref(null)
 const orderStatus = ref(null)
-/** 接口返回的二维码图片地址 */
+/** 接口返回的真实支付链接（服务端已解码） */
 const payLink = ref('')
 /** 页面展示用的二维码图片 */
 const qrSrc = ref('')
-/** 从二维码图片解码出的真实支付链接 */
-const realPayUrl = ref('')
 
 let pollTimer = null
-let lastDecodedImage = ''
+let lastPreparedLink = ''
 
-/** 解码结果包装为支付宝 render 唤起链接 */
+/** 包装为支付宝 render 唤起链接 */
 function toAlipayRenderUrl(rawUrl) {
   if (!rawUrl) return ''
-  // 已是 render 链接则直接用
   if (rawUrl.startsWith('https://render.alipay.com/')) {
     return rawUrl
   }
-  // 已是 alipays scheme，只包一层 render
   if (rawUrl.startsWith('alipays://')) {
     return `https://render.alipay.com/p/s/i/?scheme=${encodeURIComponent(rawUrl)}`
   }
@@ -119,11 +113,11 @@ const statusClass = computed(() => {
   return 'is-wait'
 })
 
-const payHref = computed(() => toAlipayRenderUrl(realPayUrl.value))
+const payHref = computed(() => toAlipayRenderUrl(payLink.value))
 
 const loadingTip = computed(() => {
   if (loading.value) return '加载订单中…'
-  if (decoding.value) return '解码二维码中…'
+  if (preparing.value) return '生成二维码中…'
   return '暂无二维码'
 })
 
@@ -135,21 +129,23 @@ function apiBase() {
   return (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 }
 
-async function ensureDecodedPayUrl(imageUrl) {
-  if (!imageUrl || isPaid.value) return
-  if (imageUrl === lastDecodedImage && realPayUrl.value) return
+async function preparePayLink(link) {
+  if (!link || isPaid.value) return
+  if (link === lastPreparedLink && qrSrc.value) return
 
-  decoding.value = true
-  decodeError.value = ''
+  preparing.value = true
   try {
-    const decoded = await decodePayUrlFromQrImage(imageUrl)
-    realPayUrl.value = decoded
-    lastDecodedImage = imageUrl
+    qrSrc.value = await QRCode.toDataURL(toAlipayRenderUrl(link), {
+      width: 220,
+      margin: 2,
+      color: { dark: '#0c1222', light: '#ffffff' },
+    })
+    lastPreparedLink = link
   } catch (e) {
-    decodeError.value = e.message || '二维码解码失败'
-    realPayUrl.value = ''
+    errorMsg.value = e.message || '二维码生成失败'
+    qrSrc.value = ''
   } finally {
-    decoding.value = false
+    preparing.value = false
   }
 }
 
@@ -183,17 +179,13 @@ async function fetchOrder(showLoading = true) {
 
     if (isPaid.value) {
       qrSrc.value = ''
-      realPayUrl.value = ''
       return
     }
 
     if (payLink.value) {
-      // 直接展示通道返回的二维码图片
-      qrSrc.value = payLink.value
-      await ensureDecodedPayUrl(payLink.value)
+      await preparePayLink(payLink.value)
     } else {
       qrSrc.value = ''
-      realPayUrl.value = ''
     }
   } catch (e) {
     errorMsg.value = `加载失败：${e.message || e}`
@@ -201,6 +193,7 @@ async function fetchOrder(showLoading = true) {
     loading.value = false
   }
 }
+
 
 function startPoll() {
   stopPoll()
@@ -337,13 +330,7 @@ onUnmounted(() => {
 .pay-tip {
   font-size: 0.85rem;
   color: var(--text-muted);
-  margin-bottom: 0.5rem;
-}
-
-.decode-error {
-  font-size: 0.8rem;
-  color: var(--danger);
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .error {

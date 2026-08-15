@@ -81,6 +81,23 @@ const realPayUrl = ref('')
 let pollTimer = null
 let lastDecodedImage = ''
 
+/** 解码结果包装为支付宝 render 唤起链接 */
+function toAlipayRenderUrl(rawUrl) {
+  if (!rawUrl) return ''
+  // 已是 render 链接则直接用
+  if (rawUrl.startsWith('https://render.alipay.com/')) {
+    return rawUrl
+  }
+  // 已是 alipays scheme，只包一层 render
+  if (rawUrl.startsWith('alipays://')) {
+    return `https://render.alipay.com/p/s/i/?scheme=${encodeURIComponent(rawUrl)}`
+  }
+  const scheme =
+    'alipays://platformapi/startapp?appId=20000067&url=' +
+    encodeURIComponent(rawUrl)
+  return `https://render.alipay.com/p/s/i/?scheme=${encodeURIComponent(scheme)}`
+}
+
 const displayAmount = computed(() => {
   const n = Number(amount.value)
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
@@ -102,7 +119,7 @@ const statusClass = computed(() => {
   return 'is-wait'
 })
 
-const payHref = computed(() => realPayUrl.value || '')
+const payHref = computed(() => toAlipayRenderUrl(realPayUrl.value))
 
 const loadingTip = computed(() => {
   if (loading.value) return '加载订单中…'

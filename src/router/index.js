@@ -5,7 +5,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'home', component: PayPage },
-    { path: '/:pathMatch(.*)*', name: 'fallback', component: PayPage },
+    { path: '/:orderNo', name: 'pay', component: PayPage },
   ],
 })
 

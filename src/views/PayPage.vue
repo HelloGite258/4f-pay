@@ -17,27 +17,19 @@
 
         <div class="qr-wrap">
           <img
-            v-if="qrSrc"
-            :src="qrSrc"
-            alt="支付二维码"
-            class="qr-image"
+              v-if="qrSrc"
+              :src="qrSrc"
+              alt="支付二维码"
+              class="qr-image"
           />
           <div v-else class="qr-loading">{{ loadingTip }}</div>
         </div>
 
         <p class="pay-tip">
-          {{ isPaid ? '订单已支付' : '请点击下方按钮唤起支付宝完成支付' }}
+          {{ isPaid ? '订单已支付' : '请使用支付宝扫码完成支付' }}
         </p>
 
-        <a
-          v-if="!isPaid && payHref"
-          class="pay-btn"
-          :href="payHref"
-        >
-          <img src="/alipay.ico" alt="" class="pay-btn-icon" />
-          去支付
-        </a>
-        <button v-else-if="isPaid" class="pay-btn is-done" type="button" disabled>
+        <button v-if="isPaid" class="pay-btn is-done" type="button" disabled>
           已支付
         </button>
       </template>
@@ -48,7 +40,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import QRCode from 'qrcode'
 
 const route = useRoute()
 
@@ -64,33 +55,15 @@ const ORDER_STATUS_MAP = {
 }
 
 const loading = ref(false)
-const preparing = ref(false)
 const errorMsg = ref('')
 const orderNo = ref('')
 const amount = ref(null)
 const orderStatus = ref(null)
-/** 接口返回的真实支付链接（服务端已解码） */
+/** 通道返回的支付二维码图片地址 */
 const payLink = ref('')
-/** 页面展示用的二维码图片 */
 const qrSrc = ref('')
 
 let pollTimer = null
-let lastPreparedLink = ''
-
-/** 包装为支付宝 render 唤起链接 */
-function toAlipayRenderUrl(rawUrl) {
-  if (!rawUrl) return ''
-  if (rawUrl.startsWith('https://render.alipay.com/')) {
-    return rawUrl
-  }
-  if (rawUrl.startsWith('alipays://')) {
-    return `https://render.alipay.com/p/s/i/?scheme=${encodeURIComponent(rawUrl)}`
-  }
-  const scheme =
-    'alipays://platformapi/startapp?appId=20000067&url=' +
-    encodeURIComponent(rawUrl)
-  return `https://render.alipay.com/p/s/i/?scheme=${encodeURIComponent(scheme)}`
-}
 
 const displayAmount = computed(() => {
   const n = Number(amount.value)
@@ -113,11 +86,8 @@ const statusClass = computed(() => {
   return 'is-wait'
 })
 
-const payHref = computed(() => toAlipayRenderUrl(payLink.value))
-
 const loadingTip = computed(() => {
   if (loading.value) return '加载订单中…'
-  if (preparing.value) return '生成二维码中…'
   return '暂无二维码'
 })
 
@@ -127,26 +97,6 @@ function resolveOrderId() {
 
 function apiBase() {
   return (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-}
-
-async function preparePayLink(link) {
-  if (!link || isPaid.value) return
-  if (link === lastPreparedLink && qrSrc.value) return
-
-  preparing.value = true
-  try {
-    qrSrc.value = await QRCode.toDataURL(toAlipayRenderUrl(link), {
-      width: 220,
-      margin: 2,
-      color: { dark: '#0c1222', light: '#ffffff' },
-    })
-    lastPreparedLink = link
-  } catch (e) {
-    errorMsg.value = e.message || '二维码生成失败'
-    qrSrc.value = ''
-  } finally {
-    preparing.value = false
-  }
 }
 
 async function fetchOrder(showLoading = true) {
@@ -179,21 +129,18 @@ async function fetchOrder(showLoading = true) {
 
     if (isPaid.value) {
       qrSrc.value = ''
+      stopPoll()
       return
     }
 
-    if (payLink.value) {
-      await preparePayLink(payLink.value)
-    } else {
-      qrSrc.value = ''
-    }
+    // 直接展示通道二维码图片，不再解码
+    qrSrc.value = payLink.value || ''
   } catch (e) {
     errorMsg.value = `加载失败：${e.message || e}`
   } finally {
     loading.value = false
   }
 }
-
 
 function startPoll() {
   stopPoll()
@@ -234,8 +181,8 @@ onUnmounted(() => {
   justify-content: center;
   padding: 2rem 1.25rem;
   background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(22, 119, 255, 0.12), transparent),
-    #fff;
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(22, 119, 255, 0.12), transparent),
+      #fff;
 }
 
 .pay-panel {
@@ -356,22 +303,11 @@ onUnmounted(() => {
   gap: 0.45rem;
   text-decoration: none;
   box-sizing: border-box;
-  margin-top: 0.75rem;
 }
 
 .pay-btn.is-done {
   opacity: 0.65;
   cursor: default;
   background: #9ca3af;
-}
-
-.pay-btn-icon {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-}
-
-.pay-btn:active {
-  transform: scale(0.98);
 }
 </style>
